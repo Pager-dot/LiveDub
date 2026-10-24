@@ -7,7 +7,7 @@ const store = {
 
 // ---------- settings ----------
 const S = ["voice", "lang", "chunk", "duck"];
-const CHECKS = ["showOrig", "dubOn", "hearOrig"];
+const CHECKS = ["showOrig", "dubOn", "hearOrig2"];
 function loadSettings() {
   S.forEach((id) => { const v = store.get("ld_" + id); if (v != null) { ensureOption(id, v); $("#" + id).value = v; } });
   CHECKS.forEach((id) => { const v = store.get("ld_" + id); if (v != null) $("#" + id).checked = v === "1"; });
@@ -26,7 +26,7 @@ function saveSettings() {
 const cfg = () => ({
   voice: $("#voice").value, lang: $("#lang").value,
   chunk: +$("#chunk").value, duck: +$("#duck").value / 100, showOrig: $("#showOrig").checked, dub: $("#dubOn").checked,
-  hearOrig: $("#hearOrig").checked,
+  hearOrig: $("#hearOrig2").checked,
 });
 loadSettings();
 $("#settingsBtn").onclick = () => $("#settings").showModal();
@@ -178,63 +178,45 @@ function setOriginalVolume(v) {
 }
 
 // ---------- picture-in-picture widget ----------
-// Document Picture-in-Picture: an always-on-top mini window with the tab preview, captions and controls.
+// Document Picture-in-Picture: an always-on-top mini window with just the English captions and Start/Stop.
 let pip = null;
 const PIP_CSS = `
   * { box-sizing: border-box; margin: 0; }
   body { background: #0e1014; color: #e8ebf1; font: 14px/1.4 system-ui, "Segoe UI", sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-  .stage { position: relative; flex: 1; min-height: 0; background: #000; }
-  video { width: 100%; height: 100%; object-fit: contain; display: block; }
-  .caps { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; padding: 0 8px; }
-  .caps div { display: inline-block; padding: 3px 9px; border-radius: 6px; background: rgba(0,0,0,.78); margin-top: 3px; }
-  .caps div:empty { display: none; }
-  #en { font-size: clamp(14px, 4.5vw, 22px); font-weight: 600; }
-  #orig { color: #ffd36e; font-size: clamp(11px, 3vw, 15px); }
+  .caps { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px 16px; }
+  #en { font-size: clamp(16px, 5.5vw, 30px); font-weight: 600; }
+  #en:empty::before { content: "English captions appear here"; color: #8a93a6; font-weight: 400; font-size: 14px; }
   .bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid #262b36; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #8a93a6; flex: none; }
   .dot.on { background: #ff4d6d; box-shadow: 0 0 6px #ff4d6d; }
   #st { flex: 1; color: #8a93a6; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #st.err { color: #ff4d6d; }
   button { background: #232836; color: #e8ebf1; border: 1px solid #262b36; border-radius: 7px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
-  .noprev .stage { background: #0e1014; }
-  .noprev video { display: none; }
-  .noprev .caps { bottom: auto; top: 50%; transform: translateY(-50%); }
 `;
 $("#pipBtn").onclick = () => openPip();
 async function openPip() {
   if (pip) return pip.focus();
   if (!("documentPictureInPicture" in window)) return status("Pop-out needs Chrome or Edge 116+", "err");
   try {
-    pip = await documentPictureInPicture.requestWindow({ width: 480, height: 320 });
+    pip = await documentPictureInPicture.requestWindow({ width: 480, height: 180 });
   } catch (e) { return status("Pop-out failed: " + e.message, "err"); }
   const d = pip.document;
   d.title = "LiveDub";
   d.head.innerHTML = `<style>${PIP_CSS}</style>`;
-  d.body.innerHTML = `<div class="stage"><video autoplay muted playsinline></video>
-      <div class="caps"><div id="orig"></div><br><div id="en"></div></div></div>
-    <div class="bar"><span class="dot"></span><span id="st"></span>
-      <button id="prev" title="Show or hide the video preview">Preview</button><button id="ss">Start</button></div>`;
-  d.getElementById("prev").onclick = () => d.body.classList.toggle("noprev");
+  d.body.innerHTML = `<div class="caps"><div id="en"></div></div>
+    <div class="bar"><span class="dot"></span><span id="st"></span><button id="ss">Start</button></div>`;
   d.getElementById("ss").onclick = () => (running ? stop() : $("#startBtn").click());
   pip.addEventListener("pagehide", () => (pip = null));
   syncPip();
 }
-let pipTrackId = null;
 function syncPip() {
   if (!pip) return;
-  const d = pip.document, v = d.querySelector("video");
-  if (!running) { v.srcObject = null; pipTrackId = null; }
-  else {
-    const track = displayStream?.getVideoTracks()[0] || (video.captureStream ? video.captureStream().getVideoTracks()[0] : null);
-    if (track && track.id !== pipTrackId) { v.srcObject = new MediaStream([track]); pipTrackId = track.id; }
-  }
-  d.body.classList.toggle("noprev", !running);
+  const d = pip.document;
   d.querySelector(".dot").classList.toggle("on", running);
   d.getElementById("ss").textContent = running ? "Stop" : "Start";
   d.getElementById("st").textContent = $("#status").textContent;
   d.getElementById("st").className = $("#status").classList.contains("err") ? "err" : "";
   d.getElementById("en").textContent = $("#capEn").textContent;
-  d.getElementById("orig").textContent = $("#capOrig").textContent;
 }
 
 // ---------- pipeline ----------
@@ -266,6 +248,7 @@ function stop() {
   clearTimeout(chunkTimer); clearInterval(meterTimer);
   if (recorder?.state === "recording") recorder.stop();
   displayStream?.getTracks().forEach((t) => t.stop()); displayStream = null;
+  try { dubNode?.stop(); } catch {}
   tabSrc?.disconnect(); tabSrc = null;
   if (mode === "file") video.pause();
   else { video.srcObject = null; $("#placeholder").classList.remove("hidden"); }
@@ -341,17 +324,27 @@ function showCaption(seg) {
   showCaption.t = setTimeout(() => { $("#capEn").textContent = ""; $("#capOrig").textContent = ""; syncPip(); }, 9000);
 }
 
-const dubAudio = new Audio();
-function playDub(seg) {
+// The dub plays through the (already running) AudioContext rather than an <audio> element:
+// Chrome defers <audio> playback in background tabs, so the voice only came out once LiveDub regained focus.
+let dubNode = null;
+async function playDub(seg) {
+  const c = audioCtx();
+  let buffer;
+  try {
+    buffer = await c.decodeAudioData(await (await fetch(seg.dubUrl)).arrayBuffer());
+  } catch { return; }
+  if (!running) return;
   return new Promise((res) => {
     const backlog = segIdx - seg.id;           // catch up if we're falling behind
-    dubAudio.src = seg.dubUrl;
-    dubAudio.playbackRate = backlog > 1 ? 1.25 : backlog > 0 ? 1.1 : 1;
+    const node = c.createBufferSource();
+    node.buffer = buffer;
+    node.playbackRate.value = backlog > 1 ? 1.25 : backlog > 0 ? 1.1 : 1;
+    node.connect(c.destination);
     setOriginalVolume(cfg().duck);
     mark(seg.id, true);
-    const done = () => { setOriginalVolume(1); mark(seg.id, false); res(); };
-    dubAudio.onended = done; dubAudio.onerror = done;
-    dubAudio.play().catch(done);
+    node.onended = () => { if (dubNode === node) dubNode = null; setOriginalVolume(1); mark(seg.id, false); res(); };
+    dubNode = node;
+    node.start();
   });
 }
 
