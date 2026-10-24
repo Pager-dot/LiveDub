@@ -1,2 +1,7 @@
 node_modules/
 .env
+*.m4a
+*.mp3
+*.wav
+Family-Camp-Vlog.txt
+image.png
