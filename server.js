@@ -2,7 +2,6 @@
 // API keys are read from .env (ELEVENLABS_API_KEY, GEMINI_API_KEY); the browser never sees them.
 const express = require("express");
 const path = require("path");
-const auth = require("./auth");
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -19,7 +18,6 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json({ limit: "1mb" }));
-auth.routes(app);
 
 const KEYS = { "x-eleven-key": "ELEVENLABS_API_KEY", "x-gemini-key": "GEMINI_API_KEY" };
 const need = (req, res, h) => {
@@ -34,7 +32,7 @@ async function relayError(res, r, who) {
 }
 
 // Speech-to-text: raw audio chunk in, { text, language } out.
-app.post("/api/stt", auth.requireUser, express.raw({ type: () => true, limit: "25mb" }), async (req, res) => {
+app.post("/api/stt", express.raw({ type: () => true, limit: "25mb" }), async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   try {
@@ -54,7 +52,7 @@ app.post("/api/stt", auth.requireUser, express.raw({ type: () => true, limit: "2
 });
 
 // Translation via Gemini Flash-Lite (cheap and fast).
-app.post("/api/translate", auth.requireUser, async (req, res) => {
+app.post("/api/translate", async (req, res) => {
   const key = need(req, res, "x-gemini-key");
   if (!key) return;
   const { text, source, context = [] } = req.body || {};
@@ -87,7 +85,7 @@ ${text}` }] }],
 });
 
 // Text-to-speech: returns audio/mpeg.
-app.post("/api/tts", auth.requireUser, async (req, res) => {
+app.post("/api/tts", async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   const { text, voiceId = "JBFqnCBsd6RMkjVDRZzb", speed = 1.0 } = req.body || {};
@@ -109,7 +107,7 @@ app.post("/api/tts", auth.requireUser, async (req, res) => {
   }
 });
 
-app.get("/api/voices", auth.requireUser, async (req, res) => {
+app.get("/api/voices", async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   const r = await fetch(`${EL}/voices`, { headers: { "xi-api-key": key } });

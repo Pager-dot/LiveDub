@@ -22,7 +22,7 @@ Audio is recorded in short chunks (default 5 s) and each chunk goes through:
 2. **Gemini Flash-Lite** (`gemini-3.5-flash-lite`) – translation to natural spoken English, using the last few lines as context
 3. **ElevenLabs Flash** (`eleven_flash_v2_5`, the cheapest ElevenLabs voice model) – English text-to-speech
 
-A tiny Express server (`server.js`) proxies these APIs. API keys live in the server's `.env` file and never reach the browser. Every API call requires a logged-in account (email + password).
+A tiny Express server (`server.js`) proxies these APIs. API keys live in the server's `.env` file and never reach the browser.
 
 ## Run the server
 
@@ -32,11 +32,9 @@ cp .env.example .env   # then fill in ELEVENLABS_API_KEY and GEMINI_API_KEY
 npm start
 ```
 
-Open the site or the widget and **sign up with an email and password** before dubbing.
-
 ## Use it (no install needed)
 
-1. Open the site in Chrome or Edge and sign up.
+1. Open the site in Chrome or Edge.
 2. Open the video or call in **another tab**.
 3. Back in LiveDub press **Start dubbing**, choose that tab under **Chrome tab**, keep **Also share tab audio** on, and press Share.
 4. Press **⧉ Pop out** for the floating Picture-in-Picture captions window, then switch back to the video tab.
@@ -47,14 +45,13 @@ Dub any tab without leaving it: a floating panel and caption overlay appear righ
 
 1. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and pick the `extension/` folder.
 2. Pin the LiveDub icon, open a video or call, and click the icon (or press **Alt+Shift+D**). Click again to stop.
-3. Log in or sign up in the panel the first time.
 4. Drag the panel anywhere; ⚙ opens settings, – minimises it. Use ▶ Original / ▶ English to compare lines.
 5. Using a hosted server (e.g. DigitalOcean)? Set its URL in ⚙ → **Server URL**.
 
 
 ## Tech
 
-Node.js, Express, pg-mem (in-memory Postgres), vanilla JS, Web Audio API, MediaRecorder, Screen Capture API, Document Picture-in-Picture API, ElevenLabs, Gemini.
+Node.js, Express, vanilla JS, Web Audio API, MediaRecorder, Screen Capture API, Document Picture-in-Picture API, ElevenLabs, Gemini.
 
 ## Limitations
 
@@ -94,3 +91,7 @@ Node.js, Express, pg-mem (in-memory Postgres), vanilla JS, Web Audio API, MediaR
 ### Male / female voice matching
 - **What:** while each chunk records, LiveDub estimates the speaker's pitch (autocorrelation on clearly voiced frames, median per chunk). 165 Hz and above uses the female English voice (default Sarah), below uses the male voice (default George). Toggle **Match speaker** in Settings; the compare panel shows the guess and pitch (e.g. `♀ 212 Hz`).
 - **Why:** a single voice for everyone made conversations hard to follow. Pitch runs in the browser, so it adds no API calls or cost. It is a heuristic: kids, music, or two speakers in one chunk can fool it.
+
+### Login removed
+- **What:** removed email/password sign-up, `auth.js` and the `pg-mem` dependency; the API routes are open again and the site opens straight to the dubbing screen.
+- **Why:** the hosted demo only runs for a few hours on the event day, so accounts added friction for judges (and needed extra production config) without much benefit. API keys still stay on the server.

@@ -46,39 +46,6 @@ $("#loadVoices").onclick = async () => {
     }
   } catch (e) { alert("Could not load voices: " + e.message); }
 };
-// ---------- account ----------
-let signup = false;
-function showAuth(on) { $("#auth").classList.toggle("hidden", !on); if (on) $("#authEmail").focus(); }
-function setUser(email) {
-  $("#whoEmail").textContent = email || "";
-  $("#logoutBtn").classList.toggle("hidden", !email);
-  showAuth(!email);
-}
-$("#authSwitch").onclick = (e) => {
-  e.preventDefault();
-  signup = !signup;
-  $("#authTitle").textContent = signup ? "Create your LiveDub account" : "Log in to LiveDub";
-  $("#authSubmit").textContent = signup ? "Sign up" : "Log in";
-  $("#authSwitchText").textContent = signup ? "Already have an account?" : "No account?";
-  $("#authSwitch").textContent = signup ? "Log in" : "Sign up";
-  $("#authPass").autocomplete = signup ? "new-password" : "current-password";
-  $("#authErr").textContent = "";
-};
-$("#authForm").onsubmit = async (e) => {
-  e.preventDefault();
-  $("#authErr").textContent = "";
-  const r = await fetch(signup ? "/api/signup" : "/api/login", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: $("#authEmail").value, password: $("#authPass").value }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) return ($("#authErr").textContent = j.error || "Something went wrong");
-  $("#authPass").value = "";
-  setUser(j.email);
-};
-$("#logoutBtn").onclick = async () => { if (running) stop(); await fetch("/api/logout", { method: "POST" }); setUser(null); };
-fetch("/api/me").then((r) => (r.ok ? r.json() : {})).then((j) => setUser(j.email)).catch(() => setUser(null));
-
 fetch("/api/health").then((r) => r.json()).then((h) => {
   if (!h.elevenlabs || !h.gemini) status("Server is missing API keys — fill in .env and restart", "err");
 }).catch(() => {});
@@ -321,7 +288,6 @@ async function api(path, opts, json = true) {
   const r = await fetch(path, opts);
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
-    if (r.status === 401) { stop(); setUser(null); }
     throw new Error(j.error || r.statusText);
   }
   return json ? r.json() : r.blob();
