@@ -7,7 +7,7 @@ const store = {
 
 // ---------- settings ----------
 const S = ["voice", "lang", "chunk", "duck"];
-const CHECKS = ["showOrig", "dubOn"];
+const CHECKS = ["showOrig", "dubOn", "hearOrig"];
 function loadSettings() {
   S.forEach((id) => { const v = store.get("ld_" + id); if (v != null) { ensureOption(id, v); $("#" + id).value = v; } });
   CHECKS.forEach((id) => { const v = store.get("ld_" + id); if (v != null) $("#" + id).checked = v === "1"; });
@@ -26,10 +26,11 @@ function saveSettings() {
 const cfg = () => ({
   voice: $("#voice").value, lang: $("#lang").value,
   chunk: +$("#chunk").value, duck: +$("#duck").value / 100, showOrig: $("#showOrig").checked, dub: $("#dubOn").checked,
+  hearOrig: $("#hearOrig").checked,
 });
 loadSettings();
 $("#settingsBtn").onclick = () => $("#settings").showModal();
-$("#settings").addEventListener("close", saveSettings);
+$("#settings").addEventListener("close", () => { saveSettings(); setOriginalVolume(1); });
 $("#chunk").oninput = (e) => ($("#chunkVal").textContent = e.target.value);
 $("#duck").oninput = (e) => ($("#duckVal").textContent = e.target.value);
 $("#loadVoices").onclick = async () => {
@@ -77,23 +78,23 @@ $("#logoutBtn").onclick = async () => { if (running) stop(); await fetch("/api/l
 fetch("/api/me").then((r) => (r.ok ? r.json() : {})).then((j) => setUser(j.email)).catch(() => setUser(null));
 
 fetch("/api/health").then((r) => r.json()).then((h) => {
-  if (!h.elevenlabs || !h.ollama) status("Server is missing API keys — fill in .env and restart", "err");
+  if (!h.elevenlabs || !h.gemini) status("Server is missing API keys — fill in .env and restart", "err");
 }).catch(() => {});
 
 // ---------- source modes ----------
-let mode = "file";
+let mode = "tab";
+const video = $("#video");
+video.controls = false;
 document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
   if (running) stop();
   mode = b.dataset.mode;
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
   document.querySelectorAll(".source").forEach((s) => s.classList.toggle("hidden", s.dataset.src !== mode));
-  $("#video").classList.toggle("hidden", mode === "youtube");
-  $("#yt").classList.toggle("hidden", mode !== "youtube");
-  $("#video").controls = mode === "file";
-  $("#placeholder").classList.toggle("hidden", mode === "youtube" && !!ytPlayer);
+  video.controls = mode === "file";
+  $("#placeholder").textContent = mode === "file" ? "Choose a video file to begin" : "Press Start dubbing and pick the tab to translate";
+  $("#placeholder").classList.toggle("hidden", mode === "file" ? !!video.getAttribute("src") : !!video.srcObject);
 }));
 
-const video = $("#video");
 $("#fileInput").onchange = (e) => {
   const f = e.target.files[0];
   if (!f) return;
@@ -103,34 +104,28 @@ $("#fileInput").onchange = (e) => {
   $("#placeholder").classList.add("hidden");
 };
 
-let ytPlayer = null;
-function ytId(url) {
-  const m = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{11})/);
-  return m ? m[1] : /^[\w-]{11}$/.test(url) ? url : null;
-}
-$("#ytLoad").onclick = () => {
-  const id = ytId($("#ytUrl").value.trim());
-  if (!id) return alert("That doesn't look like a YouTube URL");
-  $("#placeholder").classList.add("hidden");
-  if (ytPlayer) return ytPlayer.loadVideoById(id);
-  ytPlayer = new YT.Player("yt", { videoId: id, playerVars: { playsinline: 1, cc_load_policy: 0 } });
-};
-
 // ---------- audio graph ----------
-let ctx, mediaSrc, origGain, analyser, capStream, displayStream;
+// The original audio always plays through origGain on this page, so it can be ducked under the dub.
+// For another tab, Chrome mutes that tab (suppressLocalAudioPlayback) and we replay its audio here.
+let ctx, mediaSrc, origGain, analyser, capStream, displayStream, tabSrc;
 function audioCtx() {
-  ctx ??= new AudioContext();
+  if (!ctx) {
+    ctx = new AudioContext();
+    origGain = ctx.createGain();
+    origGain.connect(ctx.destination);
+  }
   ctx.resume();
   return ctx;
 }
+const baseVolume = () => (cfg().hearOrig ? 1 : 0);
 async function getCaptureStream() {
   const c = audioCtx();
+  origGain.gain.value = baseVolume();
   if (mode === "file") {
-    if (!video.src) throw new Error("Choose a video file first");
+    if (!video.getAttribute("src")) throw new Error("Choose a video file first");
     if (!mediaSrc) {
       mediaSrc = c.createMediaElementSource(video);
-      origGain = c.createGain();
-      mediaSrc.connect(origGain).connect(c.destination);
+      mediaSrc.connect(origGain);
     }
     const dest = c.createMediaStreamDestination();
     mediaSrc.connect(dest); // capture before ducking
@@ -138,32 +133,31 @@ async function getCaptureStream() {
     if (video.paused) video.play();
     return dest.stream;
   }
-  // youtube (this tab) or another tab / call
-  const opts = {
-    video: true,
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false },
-    systemAudio: "include",
-    restrictOwnAudio: true, // keep our own dub out of the capture (Chrome)
-  };
-  if (mode === "youtube") opts.preferCurrentTab = true;
-  else opts.selfBrowserSurface = "exclude";
-  displayStream = await navigator.mediaDevices.getDisplayMedia(opts);
+  displayStream = await navigator.mediaDevices.getDisplayMedia({
+    video: { displaySurface: "browser" },
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true },
+    preferCurrentTab: false,
+    selfBrowserSurface: "exclude", // never capture LiveDub itself (that made the dub get re-translated in a loop)
+    surfaceSwitching: "include",
+    systemAudio: "exclude",
+    monitorTypeSurfaces: "exclude",
+  });
   const tracks = displayStream.getAudioTracks();
   if (!tracks.length) {
     displayStream.getTracks().forEach((t) => t.stop());
-    throw new Error("No audio shared — tick “Share tab audio” in the picker");
+    displayStream = null;
+    throw new Error("No audio shared — pick a Chrome tab and keep “Also share tab audio” on");
   }
   displayStream.getVideoTracks()[0].onended = () => running && stop();
-  if (mode === "tab") {
-    video.removeAttribute("src");
-    video.srcObject = new MediaStream(displayStream.getVideoTracks());
-    video.muted = true;
-    video.play();
-    $("#placeholder").classList.add("hidden");
-  }
-  if (mode === "youtube" && ytPlayer?.playVideo) ytPlayer.playVideo();
+  video.removeAttribute("src");
+  video.srcObject = new MediaStream(displayStream.getVideoTracks());
+  video.muted = true;
+  video.play();
+  $("#placeholder").classList.add("hidden");
   const s = new MediaStream(tracks);
-  attachMeter(c.createMediaStreamSource(s));
+  tabSrc = c.createMediaStreamSource(s);
+  tabSrc.connect(origGain);
+  attachMeter(tabSrc);
   return s;
 }
 function attachMeter(node) {
@@ -180,8 +174,67 @@ function rms() {
 }
 
 function setOriginalVolume(v) {
-  if (mode === "file" && origGain) origGain.gain.setTargetAtTime(v, ctx.currentTime, 0.15);
-  if (mode === "youtube" && ytPlayer?.setVolume) ytPlayer.setVolume(Math.round(v * 100));
+  if (origGain) origGain.gain.setTargetAtTime(v * baseVolume(), ctx.currentTime, 0.15);
+}
+
+// ---------- picture-in-picture widget ----------
+// Document Picture-in-Picture: an always-on-top mini window with the tab preview, captions and controls.
+let pip = null;
+const PIP_CSS = `
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #0e1014; color: #e8ebf1; font: 14px/1.4 system-ui, "Segoe UI", sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .stage { position: relative; flex: 1; min-height: 0; background: #000; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .caps { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; padding: 0 8px; }
+  .caps div { display: inline-block; padding: 3px 9px; border-radius: 6px; background: rgba(0,0,0,.78); margin-top: 3px; }
+  .caps div:empty { display: none; }
+  #en { font-size: clamp(14px, 4.5vw, 22px); font-weight: 600; }
+  #orig { color: #ffd36e; font-size: clamp(11px, 3vw, 15px); }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid #262b36; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #8a93a6; flex: none; }
+  .dot.on { background: #ff4d6d; box-shadow: 0 0 6px #ff4d6d; }
+  #st { flex: 1; color: #8a93a6; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #st.err { color: #ff4d6d; }
+  button { background: #232836; color: #e8ebf1; border: 1px solid #262b36; border-radius: 7px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  .noprev .stage { background: #0e1014; }
+  .noprev video { display: none; }
+  .noprev .caps { bottom: auto; top: 50%; transform: translateY(-50%); }
+`;
+$("#pipBtn").onclick = () => openPip();
+async function openPip() {
+  if (pip) return pip.focus();
+  if (!("documentPictureInPicture" in window)) return status("Pop-out needs Chrome or Edge 116+", "err");
+  try {
+    pip = await documentPictureInPicture.requestWindow({ width: 480, height: 320 });
+  } catch (e) { return status("Pop-out failed: " + e.message, "err"); }
+  const d = pip.document;
+  d.title = "LiveDub";
+  d.head.innerHTML = `<style>${PIP_CSS}</style>`;
+  d.body.innerHTML = `<div class="stage"><video autoplay muted playsinline></video>
+      <div class="caps"><div id="orig"></div><br><div id="en"></div></div></div>
+    <div class="bar"><span class="dot"></span><span id="st"></span>
+      <button id="prev" title="Show or hide the video preview">Preview</button><button id="ss">Start</button></div>`;
+  d.getElementById("prev").onclick = () => d.body.classList.toggle("noprev");
+  d.getElementById("ss").onclick = () => (running ? stop() : $("#startBtn").click());
+  pip.addEventListener("pagehide", () => (pip = null));
+  syncPip();
+}
+let pipTrackId = null;
+function syncPip() {
+  if (!pip) return;
+  const d = pip.document, v = d.querySelector("video");
+  if (!running) { v.srcObject = null; pipTrackId = null; }
+  else {
+    const track = displayStream?.getVideoTracks()[0] || (video.captureStream ? video.captureStream().getVideoTracks()[0] : null);
+    if (track && track.id !== pipTrackId) { v.srcObject = new MediaStream([track]); pipTrackId = track.id; }
+  }
+  d.body.classList.toggle("noprev", !running);
+  d.querySelector(".dot").classList.toggle("on", running);
+  d.getElementById("ss").textContent = running ? "Stop" : "Start";
+  d.getElementById("st").textContent = $("#status").textContent;
+  d.getElementById("st").className = $("#status").classList.contains("err") ? "err" : "";
+  d.getElementById("en").textContent = $("#capEn").textContent;
+  d.getElementById("orig").textContent = $("#capOrig").textContent;
 }
 
 // ---------- pipeline ----------
@@ -189,7 +242,7 @@ let running = false, recorder = null, chunkTimer = null, meterTimer = null, star
 let peak = 0, chain = Promise.resolve();
 const history = [], segments = [];
 
-function status(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "status " + cls; }
+function status(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "status " + cls; syncPip(); }
 
 $("#startBtn").onclick = async () => {
   const c = cfg();
@@ -204,6 +257,7 @@ $("#startBtn").onclick = async () => {
     $("#level").style.width = Math.min(100, r * 400) + "%";
   }, 80);
   recordChunk();
+  syncPip();
 };
 $("#stopBtn").onclick = () => stop();
 
@@ -212,7 +266,9 @@ function stop() {
   clearTimeout(chunkTimer); clearInterval(meterTimer);
   if (recorder?.state === "recording") recorder.stop();
   displayStream?.getTracks().forEach((t) => t.stop()); displayStream = null;
+  tabSrc?.disconnect(); tabSrc = null;
   if (mode === "file") video.pause();
+  else { video.srcObject = null; $("#placeholder").classList.remove("hidden"); }
   $("#startBtn").disabled = false; $("#stopBtn").disabled = true;
   $("#level").style.width = "0";
   status("Stopped");
@@ -280,8 +336,9 @@ function handleChunk(blob, t0, t1) {
 function showCaption(seg) {
   $("#capEn").textContent = seg.en;
   $("#capOrig").textContent = cfg().showOrig ? seg.orig : "";
+  syncPip();
   clearTimeout(showCaption.t);
-  showCaption.t = setTimeout(() => { $("#capEn").textContent = ""; $("#capOrig").textContent = ""; }, 9000);
+  showCaption.t = setTimeout(() => { $("#capEn").textContent = ""; $("#capOrig").textContent = ""; syncPip(); }, 9000);
 }
 
 const dubAudio = new Audio();

@@ -1,11 +1,11 @@
-// LiveDub server: thin proxy to ElevenLabs (speech-to-text, TTS) and Ollama Cloud (translation).
-// API keys are read from .env (ELEVENLABS_API_KEY, OLLAMA_API_KEY); the browser never sees them.
+// LiveDub server: thin proxy to ElevenLabs (speech-to-text, TTS) and Gemini Flash-Lite (translation).
+// API keys are read from .env (ELEVENLABS_API_KEY, GEMINI_API_KEY); the browser never sees them.
 const express = require("express");
 const path = require("path");
 const auth = require("./auth");
 
-const MODEL = "gemma4:31b-cloud";
-const OLLAMA_URL = process.env.OLLAMA_URL || "https://ollama.com/api/chat";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const EL = "https://api.elevenlabs.io/v1";
 const PORT = process.env.PORT || 3000;
 
@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json({ limit: "1mb" }));
 auth.routes(app);
 
-const KEYS = { "x-eleven-key": "ELEVENLABS_API_KEY", "x-ollama-key": "OLLAMA_API_KEY" };
+const KEYS = { "x-eleven-key": "ELEVENLABS_API_KEY", "x-gemini-key": "GEMINI_API_KEY" };
 const need = (req, res, h) => {
   const v = process.env[KEYS[h]];
   if (!v) res.status(500).json({ error: `${KEYS[h]} is not set in .env` });
@@ -53,9 +53,9 @@ app.post("/api/stt", auth.requireUser, express.raw({ type: () => true, limit: "2
   }
 });
 
-// Translation via Ollama Cloud, gemma4:31b-cloud only.
+// Translation via Gemini Flash-Lite (cheap and fast).
 app.post("/api/translate", auth.requireUser, async (req, res) => {
-  const key = need(req, res, "x-ollama-key");
+  const key = need(req, res, "x-gemini-key");
   if (!key) return;
   const { text, source, context = [] } = req.body || {};
   if (!text) return res.json({ text: "" });
@@ -66,23 +66,21 @@ app.post("/api/translate", auth.requireUser, async (req, res) => {
     "If the text is already English, return it lightly cleaned up.";
   const ctx = context.length ? `Previous lines (for context only, do not translate):\n${context.join("\n")}\n\n` : "";
   try {
-    const r = await fetch(OLLAMA_URL, {
+    const r = await fetch(GEMINI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
-        model: MODEL,
-        stream: false,
-        think: false,
-        options: { temperature: 0.2 },
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: `${ctx}Source language: ${source || "auto-detect"}\nTranslate:\n${text}` },
-        ],
+        systemInstruction: { parts: [{ text: sys }] },
+        contents: [{ role: "user", parts: [{ text: `${ctx}Source language: ${source || "auto-detect"}
+Translate:
+${text}` }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
       }),
     });
-    if (!r.ok) return relayError(res, r, "Ollama");
+    if (!r.ok) return relayError(res, r, "Gemini");
     const j = await r.json();
-    res.json({ text: (j.message?.content || "").trim() });
+    const out = (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text).join("");
+    res.json({ text: out.trim() });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
@@ -121,6 +119,6 @@ app.get("/api/voices", auth.requireUser, async (req, res) => {
 });
 
 app.get("/api/health", (req, res) =>
-  res.json({ elevenlabs: !!process.env.ELEVENLABS_API_KEY, ollama: !!process.env.OLLAMA_API_KEY, model: MODEL }));
+  res.json({ elevenlabs: !!process.env.ELEVENLABS_API_KEY, gemini: !!process.env.GEMINI_API_KEY, model: MODEL }));
 
 app.listen(PORT, () => console.log(`LiveDub running at http://localhost:${PORT}`));

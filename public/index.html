@@ -29,7 +29,7 @@
   <dialog id="settings">
     <form method="dialog">
       <h2>Settings</h2>
-      <p class="hint">Translation model: <code>gemma4:31b-cloud</code>. API keys are configured on the server (.env).</p>
+      <p class="hint">Translation model: <code>gemini-3.5-flash-lite</code>. API keys are configured on the server (.env).</p>
       <label>Voice <select id="voice"><option value="JBFqnCBsd6RMkjVDRZzb">George (default)</option></select>
         <button type="button" id="loadVoices" class="ghost small">Load my voices</button></label>
       <label>Source language
@@ -44,6 +44,7 @@
       <label>Original volume while dub speaks: <b id="duckVal">20</b>% <input id="duck" type="range" min="0" max="100" value="20" /></label>
       <label class="row"><input id="showOrig" type="checkbox" checked /> Show original line under captions</label>
       <label class="row"><input id="dubOn" type="checkbox" checked /> English voiceover</label>
+      <label class="row"><input id="hearOrig" type="checkbox" checked /> Hear the original audio (quieter under the dub)</label>
       <menu><button value="ok">Save</button></menu>
     </form>
   </dialog>
@@ -51,33 +52,29 @@
   <main>
     <section class="stage">
       <nav class="tabs">
-        <button data-mode="file" class="active">📁 Video file</button>
-        <button data-mode="youtube">▶ YouTube</button>
-        <button data-mode="tab">🖥 Tab / video call</button>
+        <button data-mode="tab" class="active">🖥 Another tab / call</button>
+        <button data-mode="file">📁 Video file</button>
       </nav>
 
-      <div class="source" data-src="file">
+      <div class="source hidden" data-src="file">
         <input id="fileInput" type="file" accept="video/*,audio/*" />
       </div>
-      <div class="source hidden" data-src="youtube">
-        <input id="ytUrl" placeholder="Paste a YouTube URL…" /> <button id="ytLoad">Load</button>
-        <p class="hint">When you press Start, choose <b>“This tab”</b> and tick <b>“Also share tab audio”</b>.</p>
-      </div>
-      <div class="source hidden" data-src="tab">
-        <p class="hint">Dub a YouTube tab, Google Meet, Zoom web, Teams… Press Start, pick that <b>tab</b> and enable <b>“Share tab audio”</b>.
-          (Tip: wear headphones on calls.)</p>
+      <div class="source" data-src="tab">
+        <p class="hint">Open YouTube, Google Meet, Zoom web, Teams… in <b>another tab</b>. Press <b>Start dubbing</b>, choose that tab under
+          <b>“Chrome tab”</b> and keep <b>“Also share tab audio”</b> on. LiveDub mutes that tab and plays it here, quieter while the English voice speaks.
+          Then press <b>⧉ Pop out</b> to keep the captions floating on top while you go back to the video.</p>
       </div>
 
       <div class="player">
         <video id="video" controls playsinline></video>
-        <div id="yt" class="hidden"></div>
-        <div id="placeholder">Choose a source to begin</div>
+        <div id="placeholder">Press Start dubbing and pick the tab to translate</div>
         <div id="captions"><div id="capOrig"></div><div id="capEn"></div></div>
       </div>
 
       <div class="controls">
         <button id="startBtn" class="primary">● Start dubbing</button>
         <button id="stopBtn" disabled>■ Stop</button>
+        <button id="pipBtn" title="Floating always-on-top captions window">⧉ Pop out</button>
         <span id="status" class="status">Idle</span>
         <span class="meter"><span id="level"></span></span>
       </div>
@@ -92,7 +89,6 @@
     </aside>
   </main>
 
-  <script src="https://www.youtube.com/iframe_api"></script>
   <script src="app.js"></script>
 </body>
 </html>
