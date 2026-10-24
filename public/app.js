@@ -6,8 +6,8 @@ const store = {
 };
 
 // ---------- settings ----------
-const S = ["voice", "lang", "chunk", "duck"];
-const CHECKS = ["showOrig", "dubOn", "hearOrig2"];
+const S = ["voice", "voiceF", "lang", "chunk", "duck"];
+const CHECKS = ["showOrig", "dubOn", "hearOrig2", "autoVoice"];
 function loadSettings() {
   S.forEach((id) => { const v = store.get("ld_" + id); if (v != null) { ensureOption(id, v); $("#" + id).value = v; } });
   CHECKS.forEach((id) => { const v = store.get("ld_" + id); if (v != null) $("#" + id).checked = v === "1"; });
@@ -24,7 +24,7 @@ function saveSettings() {
   const v = $("#voice"); store.set("ld_voiceName", v.options[v.selectedIndex]?.text || "");
 }
 const cfg = () => ({
-  voice: $("#voice").value, lang: $("#lang").value,
+  voice: $("#voice").value, voiceF: $("#voiceF").value, autoVoice: $("#autoVoice").checked, lang: $("#lang").value,
   chunk: +$("#chunk").value, duck: +$("#duck").value / 100, showOrig: $("#showOrig").checked, dub: $("#dubOn").checked,
   hearOrig: $("#hearOrig2").checked,
 });
@@ -38,10 +38,12 @@ $("#loadVoices").onclick = async () => {
     const r = await fetch("/api/voices");
     const list = await r.json();
     if (!r.ok) throw new Error(list.error);
-    const sel = $("#voice"), cur = sel.value;
-    sel.innerHTML = "";
-    list.forEach((v) => sel.add(new Option(v.name, v.id)));
-    if (list.some((v) => v.id === cur)) sel.value = cur;
+    for (const sel of [$("#voice"), $("#voiceF")]) {
+      const cur = sel.value;
+      sel.innerHTML = "";
+      list.forEach((v) => sel.add(new Option(v.name, v.id)));
+      if (list.some((v) => v.id === cur)) sel.value = cur;
+    }
   } catch (e) { alert("Could not load voices: " + e.message); }
 };
 // ---------- account ----------
@@ -173,15 +175,38 @@ async function getCaptureStream() {
 }
 function attachMeter(node) {
   analyser = ctx.createAnalyser();
-  analyser.fftSize = 1024;
+  analyser.fftSize = 2048;
   node.connect(analyser);
 }
-const buf = new Float32Array(1024);
+const buf = new Float32Array(2048);
 function rms() {
   if (!analyser) return 0;
   analyser.getFloatTimeDomainData(buf);
   let s = 0; for (const v of buf) s += v * v;
   return Math.sqrt(s / buf.length);
+}
+
+// ---------- speaker pitch -> male / female voice ----------
+// Autocorrelation pitch estimate on the analyser frame. Typical adult speech: male ~85-165 Hz, female ~165-255 Hz.
+let pitches = [];
+function pitch() {
+  const sr = ctx.sampleRate, n = buf.length;
+  const minLag = Math.floor(sr / 400), maxLag = Math.min(Math.floor(sr / 70), n - 1);
+  let best = 0, bestLag = 0, energy = 0;
+  for (let i = 0; i < n; i++) energy += buf[i] * buf[i];
+  if (!energy) return 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = 0; i + lag < n; i++) sum += buf[i] * buf[i + lag];
+    if (sum > best) { best = sum; bestLag = lag; }
+  }
+  return best / energy > 0.5 && bestLag ? sr / bestLag : 0; // only clearly voiced frames
+}
+const median = (a) => { if (a.length < 3) return 0; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+const genderOf = (f0) => (!f0 ? "" : f0 >= 165 ? "female" : "male");
+function voiceFor(c, f0) {
+  if (!c.autoVoice) return c.voice;
+  return genderOf(f0) === "female" ? c.voiceF : c.voice;
 }
 
 function setOriginalVolume(v) {
@@ -250,6 +275,7 @@ $("#startBtn").onclick = async () => {
   status("Listening…", "live");
   meterTimer = setInterval(() => {
     const r = rms(); peak = Math.max(peak, r);
+    if (r > 0.02) { const f = pitch(); if (f) pitches.push(f); }
     $("#level").style.width = Math.min(100, r * 400) + "%";
   }, 80);
   recordChunk();
@@ -278,12 +304,13 @@ function recordChunk() {
   const rec = new MediaRecorder(capStream, mime ? { mimeType: mime } : undefined);
   const parts = [], t0 = (performance.now() - startedAt) / 1000;
   peak = 0;
+  pitches = [];
   rec.ondataavailable = (e) => e.data.size && parts.push(e.data);
   rec.onstop = () => {
-    const loud = peak;
+    const loud = peak, f0 = median(pitches);
     if (running) recordChunk(); // start next chunk immediately
     if (loud < 0.01) return; // silence, skip
-    handleChunk(new Blob(parts, { type: rec.mimeType }), t0, (performance.now() - startedAt) / 1000);
+    handleChunk(new Blob(parts, { type: rec.mimeType }), t0, (performance.now() - startedAt) / 1000, f0);
   };
   rec.start();
   recorder = rec;
@@ -300,7 +327,7 @@ async function api(path, opts, json = true) {
   return json ? r.json() : r.blob();
 }
 
-function handleChunk(blob, t0, t1) {
+function handleChunk(blob, t0, t1, f0) {
   const c = cfg(), id = ++segIdx, sent = performance.now();
   // Work starts in parallel; results are shown/played in order through `chain`.
   const work = (async () => {
@@ -315,9 +342,9 @@ function handleChunk(blob, t0, t1) {
     history.push(stt.text);
     const audio = c.dub ? await api("/api/tts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: tr.text, voiceId: c.voice }),
+      body: JSON.stringify({ text: tr.text, voiceId: voiceFor(c, f0) }),
     }, false).catch((e) => (status("TTS: " + e.message, "err"), null)) : null;
-    return { id, t0, t1, orig: stt.text, lang: stt.language, en: tr.text, origUrl: URL.createObjectURL(blob),
+    return { id, t0, t1, orig: stt.text, lang: stt.language, en: tr.text, f0, gender: genderOf(f0), origUrl: URL.createObjectURL(blob),
       dubUrl: audio && URL.createObjectURL(audio), latency: (performance.now() - sent) / 1000 };
   })().catch((e) => { status(e.message, "err"); return null; });
 
@@ -411,7 +438,7 @@ function addSegmentCard(seg) {
   const el = document.createElement("div");
   el.className = "seg"; el.id = "seg" + seg.id;
   el.innerHTML = `
-    <div class="meta"><span>#${seg.id} · ${fmt(seg.t0)}–${fmt(seg.t1)} · ${esc(seg.lang || "?")}</span><span>${seg.latency.toFixed(1)}s latency</span></div>
+    <div class="meta"><span>#${seg.id} · ${fmt(seg.t0)}–${fmt(seg.t1)} · ${esc(seg.lang || "?")}${seg.gender ? ` · ${seg.gender === "female" ? "♀" : "♂"} ${Math.round(seg.f0)} Hz` : ""}</span><span>${seg.latency.toFixed(1)}s latency</span></div>
     <div class="cols"><div class="orig">${esc(seg.orig)}</div><div class="en">${esc(seg.en)}</div></div>
     <div class="btns"><button class="small" data-a="orig">▶ Original</button>${seg.dubUrl ? '<button class="small" data-a="dub">▶ English dub</button>' : ""}</div>`;
   el.querySelectorAll("button").forEach((b) => (b.onclick = () => {

@@ -30,8 +30,10 @@
     <form method="dialog">
       <h2>Settings</h2>
       <p class="hint">Translation model: <code>gemini-3.5-flash-lite</code>. API keys are configured on the server (.env).</p>
-      <label>Voice <select id="voice"><option value="JBFqnCBsd6RMkjVDRZzb">George (default)</option></select>
-        <button type="button" id="loadVoices" class="ghost small">Load my voices</button></label>
+      <label class="row"><input id="autoVoice" type="checkbox" checked /> Match speaker (male / female voice by pitch)</label>
+      <label>Male voice (also used when matching is off) <select id="voice"><option value="JBFqnCBsd6RMkjVDRZzb">George</option></select></label>
+      <label>Female voice <select id="voiceF"><option value="EXAVITQu4vr4xnSDxMaL">Sarah</option></select></label>
+      <button type="button" id="loadVoices" class="ghost small">Load my voices</button>
       <label>Source language
         <select id="lang">
           <option value="auto">Auto-detect</option>

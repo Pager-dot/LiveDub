@@ -90,3 +90,7 @@ Node.js, Express, pg-mem (in-memory Postgres), vanilla JS, Web Audio API, MediaR
 ### Only a single Chrome tab can be shared; dub plays from the pop-out
 - **What:** LiveDub now rejects a shared window or entire screen and asks for a Chrome tab (`displaySurface` must be `browser`; `surfaceSwitching`, `systemAudio` and `windowAudio` excluded). The shared tab is silenced by Chrome, the English voice plays through Web Audio (from the ⧉ Pop out window when it is open), a 🔊 Test button checks the voice is audible, and a repeat filter drops any transcript that is mostly words LiveDub just spoke.
 - **Why:** debugging showed the share picker had captured a *window with system audio*. System audio includes LiveDub's own English voice, so it was re-dubbed in a loop, and silencing the shared source muted the dub itself. Restricting capture to one tab fixes both. Web Audio is used because Chrome defers `<audio>` playback in background tabs.
+
+### Male / female voice matching
+- **What:** while each chunk records, LiveDub estimates the speaker's pitch (autocorrelation on clearly voiced frames, median per chunk). 165 Hz and above uses the female English voice (default Sarah), below uses the male voice (default George). Toggle **Match speaker** in Settings; the compare panel shows the guess and pitch (e.g. `♀ 212 Hz`).
+- **Why:** a single voice for everyone made conversations hard to follow. Pitch runs in the browser, so it adds no API calls or cost. It is a heuristic: kids, music, or two speakers in one chunk can fool it.
