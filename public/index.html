@@ -60,8 +60,8 @@
         <input id="fileInput" type="file" accept="video/*,audio/*" />
       </div>
       <div class="source" data-src="tab">
-        <p class="hint">Open YouTube, Google Meet, Zoom web, Teams… in <b>another tab</b>. Press <b>Start dubbing</b>, choose that tab under
-          <b>“Chrome tab”</b> and keep <b>“Also share tab audio”</b> on. LiveDub mutes that tab so you only hear the English voice.
+        <p class="hint">Open YouTube, Google Meet, Zoom web, Teams… in <b>another tab</b>. Press <b>Start dubbing</b>, choose that tab in the
+          <b>“Chrome tab”</b> section (not Window or Entire screen) and keep <b>“Also share tab audio”</b> on. LiveDub silences that tab so you only hear the English voice. <b>Keep the ⧉ Pop out window open</b> — the English voice plays from it.
           Then press <b>⧉ Pop out</b> to keep the captions floating on top while you go back to the video.</p>
       </div>
 
@@ -74,6 +74,7 @@
       <div class="controls">
         <button id="startBtn" class="primary">● Start dubbing</button>
         <button id="stopBtn" disabled>■ Stop</button>
+        <button id="testBtn" title="Play a short beep to check you can hear LiveDub">🔊 Test voice</button>
         <button id="pipBtn" title="Floating always-on-top captions window">⧉ Pop out</button>
         <span id="status" class="status">Idle</span>
         <span class="meter"><span id="level"></span></span>

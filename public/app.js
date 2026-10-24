@@ -106,7 +106,7 @@ $("#fileInput").onchange = (e) => {
 
 // ---------- audio graph ----------
 // The original audio always plays through origGain on this page, so it can be ducked under the dub.
-// For another tab, Chrome mutes that tab (suppressLocalAudioPlayback) and we replay its audio here.
+// For another tab, the user mutes that tab (right-click → Mute site); capture still receives its audio.
 let ctx, mediaSrc, origGain, analyser, capStream, displayStream, tabSrc;
 function audioCtx() {
   if (!ctx) {
@@ -136,10 +136,13 @@ async function getCaptureStream() {
   displayStream = await navigator.mediaDevices.getDisplayMedia({
     video: { displaySurface: "browser" },
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true },
+    // suppressLocalAudioPlayback: true also silenced LiveDub's own output on Chrome/Windows, so the dub
+    // was inaudible while sharing. Users mute the shared tab instead (Chrome still captures a muted tab).
     preferCurrentTab: false,
     selfBrowserSurface: "exclude", // never capture LiveDub itself (that made the dub get re-translated in a loop)
-    surfaceSwitching: "include",
+    surfaceSwitching: "exclude", // no "Share this tab instead" button, which could switch the capture to LiveDub itself
     systemAudio: "exclude",
+    windowAudio: "exclude",
     monitorTypeSurfaces: "exclude",
   });
   const tracks = displayStream.getAudioTracks();
@@ -148,7 +151,15 @@ async function getCaptureStream() {
     displayStream = null;
     throw new Error("No audio shared — pick a Chrome tab and keep “Also share tab audio” on");
   }
-  displayStream.getVideoTracks()[0].onended = () => running && stop();
+  const vt = displayStream.getVideoTracks()[0];
+  // Only a single Chrome tab works: a window or screen shares *system* audio, which includes LiveDub's own
+  // English voice (it gets re-dubbed in a loop), and silencing it mutes the dub too.
+  if (vt.getSettings().displaySurface !== "browser") {
+    displayStream.getTracks().forEach((t) => t.stop());
+    displayStream = null;
+    throw new Error("Please share a Chrome tab (the “Chrome tab” section), not a window or the entire screen");
+  }
+  vt.onended = () => running && stop();
   video.removeAttribute("src");
   video.srcObject = new MediaStream(displayStream.getVideoTracks());
   video.muted = true;
@@ -204,9 +215,11 @@ async function openPip() {
   d.title = "LiveDub";
   d.head.innerHTML = `<style>${PIP_CSS}</style>`;
   d.body.innerHTML = `<div class="caps"><div id="en"></div></div>
-    <div class="bar"><span class="dot"></span><span id="st"></span><button id="ss">Start</button></div>`;
-  d.getElementById("ss").onclick = () => (running ? stop() : $("#startBtn").click());
-  pip.addEventListener("pagehide", () => (pip = null));
+    <div class="bar"><span class="dot"></span><span id="st"></span><button id="pt">🔊 Test</button><button id="ss">Start</button></div>`;
+  d.getElementById("ss").onclick = () => { pipAudio(); running ? stop() : $("#startBtn").click(); };
+  d.getElementById("pt").onclick = () => beep(pipAudio(), "pip-test-beep");
+  pip.addEventListener("pagehide", () => { pip = null; pipCtx = null; });
+  pipAudio();
   syncPip();
 }
 function syncPip() {
@@ -227,6 +240,7 @@ const history = [], segments = [];
 function status(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "status " + cls; syncPip(); }
 
 $("#startBtn").onclick = async () => {
+  dubContext();
   const c = cfg();
   try {
     capStream = await getCaptureStream();
@@ -268,7 +282,7 @@ function recordChunk() {
   rec.onstop = () => {
     const loud = peak;
     if (running) recordChunk(); // start next chunk immediately
-    if (loud < 0.01) return;     // silence, skip
+    if (loud < 0.01) return; // silence, skip
     handleChunk(new Blob(parts, { type: rec.mimeType }), t0, (performance.now() - startedAt) / 1000);
   };
   rec.start();
@@ -292,6 +306,7 @@ function handleChunk(blob, t0, t1) {
   const work = (async () => {
     const stt = await api(`/api/stt?lang=${c.lang}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
     if (!stt.text || stt.text.length < 2) return null;
+    if (isOwnDub(stt.text)) return null; // our own dub leaking back in
     const tr = await api("/api/translate", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: stt.text, source: stt.language || c.lang, context: history.slice(-3) }),
@@ -312,7 +327,7 @@ function handleChunk(blob, t0, t1) {
     segments.push(seg);
     addSegmentCard(seg);
     showCaption(seg);
-    if (seg.dubUrl) await playDub(seg);
+    if (seg.dubUrl) { rememberDub(seg.en); await playDub(seg); }
   });
 }
 
@@ -327,8 +342,48 @@ function showCaption(seg) {
 // The dub plays through the (already running) AudioContext rather than an <audio> element:
 // Chrome defers <audio> playback in background tabs, so the voice only came out once LiveDub regained focus.
 let dubNode = null;
+// Repeat filter: drop a transcript that is mostly words LiveDub itself just spoke (the dub leaking into the capture).
+const recentDubs = [];
+const words = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").split(/\s+/).filter(Boolean);
+function isOwnDub(text) {
+  const w = words(text);
+  if (w.length < 2) return false;
+  return recentDubs.some((d) => {
+    const set = new Set(words(d));
+    return w.filter((x) => set.has(x)).length / w.length >= 0.6;
+  });
+}
+function rememberDub(text) {
+  recentDubs.push(text);
+  if (recentDubs.length > 6) recentDubs.shift();
+}
+// Separate AudioContext for the English voice, never connected to the captured tab's audio.
+let dubCtx = null;
+// The English voice plays from the pop-out window when it is open: Chrome silences the LiveDub tab's own
+// output while it shares another tab with suppressLocalAudioPlayback, but the pop-out is a separate window.
+let pipCtx = null;
+function pipAudio() {
+  if (!pip) return null;
+  pipCtx ??= new pip.AudioContext({ latencyHint: "playback" });
+  if (pipCtx.state !== "running") pipCtx.resume();
+  return pipCtx;
+}
+function beep(c, ev) {
+  if (!c) return;
+  const o = c.createOscillator(), g = c.createGain();
+  o.frequency.value = 660; g.gain.value = 0.2;
+  o.connect(g).connect(c.destination);
+  o.start(); o.stop(c.currentTime + 0.6);
+}
+function dubContext() {
+  const pc = pipAudio();
+  if (pc) return pc;
+  dubCtx ??= new AudioContext({ latencyHint: "playback" });
+  if (dubCtx.state !== "running") dubCtx.resume();
+  return dubCtx;
+}
 async function playDub(seg) {
-  const c = audioCtx();
+  const c = dubContext();
   let buffer;
   try {
     buffer = await c.decodeAudioData(await (await fetch(seg.dubUrl)).arrayBuffer());
@@ -374,3 +429,6 @@ $("#exportBtn").onclick = () => {
   a.href = URL.createObjectURL(new Blob([srt], { type: "text/plain" }));
   a.download = "livedub.srt"; a.click();
 };
+
+// Quick check that this page's sound reaches the speakers.
+$("#testBtn").onclick = () => beep(dubContext(), "test-beep");
