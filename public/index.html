@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiveDub</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span> LiveDub <small>live captions · English voiceover</small></div>
+    <button id="settingsBtn" class="ghost">⚙ Settings</button>
+  </header>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label>ElevenLabs API key <input id="elKey" type="password" autocomplete="off" /></label>
+      <label>Ollama API key <input id="olKey" type="password" autocomplete="off" /></label>
+      <p class="hint">Translation model: <code>gemma4:31b-cloud</code> (fixed). Keys are kept in this browser only.</p>
+      <label>Voice <select id="voice"><option value="JBFqnCBsd6RMkjVDRZzb">George (default)</option></select>
+        <button type="button" id="loadVoices" class="ghost small">Load my voices</button></label>
+      <label>Source language
+        <select id="lang">
+          <option value="auto">Auto-detect</option>
+          <option value="ja">Japanese</option><option value="es">Spanish</option><option value="fr">French</option>
+          <option value="de">German</option><option value="hi">Hindi</option><option value="ko">Korean</option>
+          <option value="zh">Chinese</option><option value="ru">Russian</option><option value="pt">Portuguese</option>
+          <option value="it">Italian</option><option value="ar">Arabic</option>
+        </select></label>
+      <label>Chunk length: <b id="chunkVal">5</b>s <input id="chunk" type="range" min="3" max="12" value="5" /></label>
+      <label>Original volume while dub speaks: <b id="duckVal">20</b>% <input id="duck" type="range" min="0" max="100" value="20" /></label>
+      <label class="row"><input id="showOrig" type="checkbox" checked /> Show original line under captions</label>
+      <label class="row"><input id="dubOn" type="checkbox" checked /> English voiceover</label>
+      <menu><button value="ok">Save</button></menu>
+    </form>
+  </dialog>
+
+  <main>
+    <section class="stage">
+      <nav class="tabs">
+        <button data-mode="file" class="active">📁 Video file</button>
+        <button data-mode="youtube">▶ YouTube</button>
+        <button data-mode="tab">🖥 Tab / video call</button>
+      </nav>
+
+      <div class="source" data-src="file">
+        <input id="fileInput" type="file" accept="video/*,audio/*" />
+      </div>
+      <div class="source hidden" data-src="youtube">
+        <input id="ytUrl" placeholder="Paste a YouTube URL…" /> <button id="ytLoad">Load</button>
+        <p class="hint">When you press Start, choose <b>“This tab”</b> and tick <b>“Also share tab audio”</b>.</p>
+      </div>
+      <div class="source hidden" data-src="tab">
+        <p class="hint">Dub a YouTube tab, Google Meet, Zoom web, Teams… Press Start, pick that <b>tab</b> and enable <b>“Share tab audio”</b>.
+          (Tip: wear headphones on calls.)</p>
+      </div>
+
+      <div class="player">
+        <video id="video" controls playsinline></video>
+        <div id="yt" class="hidden"></div>
+        <div id="placeholder">Choose a source to begin</div>
+        <div id="captions"><div id="capOrig"></div><div id="capEn"></div></div>
+      </div>
+
+      <div class="controls">
+        <button id="startBtn" class="primary">● Start dubbing</button>
+        <button id="stopBtn" disabled>■ Stop</button>
+        <span id="status" class="status">Idle</span>
+        <span class="meter"><span id="level"></span></span>
+      </div>
+    </section>
+
+    <aside class="compare">
+      <div class="compare-head">
+        <h2>Original ⇄ Translation</h2>
+        <button id="exportBtn" class="ghost small">Export .srt</button>
+      </div>
+      <div id="segments"><p class="empty">Segments appear here as speech is detected. Play the original clip and the English dub side by side.</p></div>
+    </aside>
+  </main>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="app.js"></script>
+</body>
+</html>
