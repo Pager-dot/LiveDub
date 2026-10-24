@@ -1,7 +1,8 @@
 // LiveDub server: thin proxy to ElevenLabs (speech-to-text, TTS) and Ollama Cloud (translation).
-// API keys come from the browser per request (x-eleven-key / x-ollama-key headers) and are never stored.
+// API keys are read from .env (ELEVENLABS_API_KEY, OLLAMA_API_KEY); the browser never sees them.
 const express = require("express");
 const path = require("path");
+const auth = require("./auth");
 
 const MODEL = "gemma4:31b-cloud";
 const OLLAMA_URL = process.env.OLLAMA_URL || "https://ollama.com/api/chat";
@@ -9,12 +10,21 @@ const EL = "https://api.elevenlabs.io/v1";
 const PORT = process.env.PORT || 3000;
 
 const app = express();
+// Allow the Chrome extension (and other local pages) to call the API.
+app.use((req, res, next) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json({ limit: "1mb" }));
+auth.routes(app);
 
+const KEYS = { "x-eleven-key": "ELEVENLABS_API_KEY", "x-ollama-key": "OLLAMA_API_KEY" };
 const need = (req, res, h) => {
-  const v = req.get(h);
-  if (!v) res.status(400).json({ error: `Missing ${h}` });
+  const v = process.env[KEYS[h]];
+  if (!v) res.status(500).json({ error: `${KEYS[h]} is not set in .env` });
   return v;
 };
 
@@ -24,7 +34,7 @@ async function relayError(res, r, who) {
 }
 
 // Speech-to-text: raw audio chunk in, { text, language } out.
-app.post("/api/stt", express.raw({ type: () => true, limit: "25mb" }), async (req, res) => {
+app.post("/api/stt", auth.requireUser, express.raw({ type: () => true, limit: "25mb" }), async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   try {
@@ -44,7 +54,7 @@ app.post("/api/stt", express.raw({ type: () => true, limit: "25mb" }), async (re
 });
 
 // Translation via Ollama Cloud, gemma4:31b-cloud only.
-app.post("/api/translate", async (req, res) => {
+app.post("/api/translate", auth.requireUser, async (req, res) => {
   const key = need(req, res, "x-ollama-key");
   if (!key) return;
   const { text, source, context = [] } = req.body || {};
@@ -79,7 +89,7 @@ app.post("/api/translate", async (req, res) => {
 });
 
 // Text-to-speech: returns audio/mpeg.
-app.post("/api/tts", async (req, res) => {
+app.post("/api/tts", auth.requireUser, async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   const { text, voiceId = "JBFqnCBsd6RMkjVDRZzb", speed = 1.0 } = req.body || {};
@@ -101,7 +111,7 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-app.get("/api/voices", async (req, res) => {
+app.get("/api/voices", auth.requireUser, async (req, res) => {
   const key = need(req, res, "x-eleven-key");
   if (!key) return;
   const r = await fetch(`${EL}/voices`, { headers: { "xi-api-key": key } });
@@ -109,5 +119,8 @@ app.get("/api/voices", async (req, res) => {
   const j = await r.json();
   res.json((j.voices || []).map((v) => ({ id: v.voice_id, name: v.name })));
 });
+
+app.get("/api/health", (req, res) =>
+  res.json({ elevenlabs: !!process.env.ELEVENLABS_API_KEY, ollama: !!process.env.OLLAMA_API_KEY, model: MODEL }));
 
 app.listen(PORT, () => console.log(`LiveDub running at http://localhost:${PORT}`));

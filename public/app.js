@@ -6,7 +6,7 @@ const store = {
 };
 
 // ---------- settings ----------
-const S = ["elKey", "olKey", "voice", "lang", "chunk", "duck"];
+const S = ["voice", "lang", "chunk", "duck"];
 const CHECKS = ["showOrig", "dubOn"];
 function loadSettings() {
   S.forEach((id) => { const v = store.get("ld_" + id); if (v != null) { ensureOption(id, v); $("#" + id).value = v; } });
@@ -24,7 +24,7 @@ function saveSettings() {
   const v = $("#voice"); store.set("ld_voiceName", v.options[v.selectedIndex]?.text || "");
 }
 const cfg = () => ({
-  el: $("#elKey").value.trim(), ol: $("#olKey").value.trim(), voice: $("#voice").value, lang: $("#lang").value,
+  voice: $("#voice").value, lang: $("#lang").value,
   chunk: +$("#chunk").value, duck: +$("#duck").value / 100, showOrig: $("#showOrig").checked, dub: $("#dubOn").checked,
 });
 loadSettings();
@@ -34,7 +34,7 @@ $("#chunk").oninput = (e) => ($("#chunkVal").textContent = e.target.value);
 $("#duck").oninput = (e) => ($("#duckVal").textContent = e.target.value);
 $("#loadVoices").onclick = async () => {
   try {
-    const r = await fetch("/api/voices", { headers: { "x-eleven-key": cfg().el } });
+    const r = await fetch("/api/voices");
     const list = await r.json();
     if (!r.ok) throw new Error(list.error);
     const sel = $("#voice"), cur = sel.value;
@@ -43,7 +43,42 @@ $("#loadVoices").onclick = async () => {
     if (list.some((v) => v.id === cur)) sel.value = cur;
   } catch (e) { alert("Could not load voices: " + e.message); }
 };
-if (!cfg().el || !cfg().ol) $("#settings").showModal();
+// ---------- account ----------
+let signup = false;
+function showAuth(on) { $("#auth").classList.toggle("hidden", !on); if (on) $("#authEmail").focus(); }
+function setUser(email) {
+  $("#whoEmail").textContent = email || "";
+  $("#logoutBtn").classList.toggle("hidden", !email);
+  showAuth(!email);
+}
+$("#authSwitch").onclick = (e) => {
+  e.preventDefault();
+  signup = !signup;
+  $("#authTitle").textContent = signup ? "Create your LiveDub account" : "Log in to LiveDub";
+  $("#authSubmit").textContent = signup ? "Sign up" : "Log in";
+  $("#authSwitchText").textContent = signup ? "Already have an account?" : "No account?";
+  $("#authSwitch").textContent = signup ? "Log in" : "Sign up";
+  $("#authPass").autocomplete = signup ? "new-password" : "current-password";
+  $("#authErr").textContent = "";
+};
+$("#authForm").onsubmit = async (e) => {
+  e.preventDefault();
+  $("#authErr").textContent = "";
+  const r = await fetch(signup ? "/api/signup" : "/api/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: $("#authEmail").value, password: $("#authPass").value }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return ($("#authErr").textContent = j.error || "Something went wrong");
+  $("#authPass").value = "";
+  setUser(j.email);
+};
+$("#logoutBtn").onclick = async () => { if (running) stop(); await fetch("/api/logout", { method: "POST" }); setUser(null); };
+fetch("/api/me").then((r) => (r.ok ? r.json() : {})).then((j) => setUser(j.email)).catch(() => setUser(null));
+
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  if (!h.elevenlabs || !h.ollama) status("Server is missing API keys — fill in .env and restart", "err");
+}).catch(() => {});
 
 // ---------- source modes ----------
 let mode = "file";
@@ -158,7 +193,6 @@ function status(t, cls = "") { const s = $("#status"); s.textContent = t; s.clas
 
 $("#startBtn").onclick = async () => {
   const c = cfg();
-  if (!c.el || !c.ol) return $("#settings").showModal();
   try {
     capStream = await getCaptureStream();
   } catch (e) { return status(e.message, "err"); }
@@ -205,7 +239,11 @@ function recordChunk() {
 
 async function api(path, opts, json = true) {
   const r = await fetch(path, opts);
-  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { stop(); setUser(null); }
+    throw new Error(j.error || r.statusText);
+  }
   return json ? r.json() : r.blob();
 }
 
@@ -213,16 +251,16 @@ function handleChunk(blob, t0, t1) {
   const c = cfg(), id = ++segIdx, sent = performance.now();
   // Work starts in parallel; results are shown/played in order through `chain`.
   const work = (async () => {
-    const stt = await api(`/api/stt?lang=${c.lang}`, { method: "POST", headers: { "x-eleven-key": c.el, "Content-Type": blob.type }, body: blob });
+    const stt = await api(`/api/stt?lang=${c.lang}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
     if (!stt.text || stt.text.length < 2) return null;
     const tr = await api("/api/translate", {
-      method: "POST", headers: { "x-ollama-key": c.ol, "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: stt.text, source: stt.language || c.lang, context: history.slice(-3) }),
     });
     if (!tr.text) return null;
     history.push(stt.text);
     const audio = c.dub ? await api("/api/tts", {
-      method: "POST", headers: { "x-eleven-key": c.el, "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: tr.text, voiceId: c.voice }),
     }, false).catch((e) => (status("TTS: " + e.message, "err"), null)) : null;
     return { id, t0, t1, orig: stt.text, lang: stt.language, en: tr.text, origUrl: URL.createObjectURL(blob),

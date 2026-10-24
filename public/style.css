@@ -54,3 +54,10 @@ dialog label { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; 
 dialog label.row { flex-direction: row; align-items: center; }
 dialog menu { display: flex; justify-content: flex-end; padding: 0; }
 code { color: var(--accent2); }
+.who { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.auth { position: fixed; inset: 0; z-index: 10; background: rgba(8,9,12,.85); display: grid; place-items: center; padding: 16px; }
+.auth-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; width: min(380px, 100%); display: flex; flex-direction: column; gap: 10px; }
+.auth-card h2 { margin: 0; }
+.auth-card label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.auth-err { color: var(--accent); min-height: 1em; margin: 0; font-size: 13px; }
+.auth-card a { color: var(--accent2); }

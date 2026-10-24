@@ -9,15 +9,27 @@
 <body>
   <header>
     <div class="brand"><span class="dot"></span> LiveDub <small>live captions · English voiceover</small></div>
-    <button id="settingsBtn" class="ghost">⚙ Settings</button>
+    <div class="who"><span id="whoEmail"></span>
+      <button id="logoutBtn" class="ghost small hidden">Log out</button>
+      <button id="settingsBtn" class="ghost">⚙ Settings</button></div>
   </header>
+
+  <div id="auth" class="auth hidden">
+    <form id="authForm" class="auth-card">
+      <h2 id="authTitle">Log in to LiveDub</h2>
+      <p class="hint">An account is required so only real users can run translations.</p>
+      <label>Email <input id="authEmail" type="email" autocomplete="email" required /></label>
+      <label>Password <input id="authPass" type="password" autocomplete="current-password" minlength="8" required /></label>
+      <p id="authErr" class="auth-err"></p>
+      <button class="primary" id="authSubmit">Log in</button>
+      <p class="hint"><span id="authSwitchText">No account?</span> <a href="#" id="authSwitch">Sign up</a></p>
+    </form>
+  </div>
 
   <dialog id="settings">
     <form method="dialog">
       <h2>Settings</h2>
-      <label>ElevenLabs API key <input id="elKey" type="password" autocomplete="off" /></label>
-      <label>Ollama API key <input id="olKey" type="password" autocomplete="off" /></label>
-      <p class="hint">Translation model: <code>gemma4:31b-cloud</code> (fixed). Keys are kept in this browser only.</p>
+      <p class="hint">Translation model: <code>gemma4:31b-cloud</code>. API keys are configured on the server (.env).</p>
       <label>Voice <select id="voice"><option value="JBFqnCBsd6RMkjVDRZzb">George (default)</option></select>
         <button type="button" id="loadVoices" class="ghost small">Load my voices</button></label>
       <label>Source language
