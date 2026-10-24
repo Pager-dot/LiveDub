@@ -95,3 +95,7 @@ Node.js, Express, vanilla JS, Web Audio API, MediaRecorder, Screen Capture API, 
 ### Login removed
 - **What:** removed email/password sign-up, `auth.js` and the `pg-mem` dependency; the API routes are open again and the site opens straight to the dubbing screen.
 - **Why:** the hosted demo only runs for a few hours on the event day, so accounts added friction for judges (and needed extra production config) without much benefit. API keys still stay on the server.
+
+## Deploy on Render
+
+`render.yaml` is a Render Blueprint: in the Render dashboard choose **New → Blueprint**, pick this repo, and paste `ELEVENLABS_API_KEY` and `GEMINI_API_KEY` when asked. It runs on the free plan with HTTPS, which Chrome needs for tab capture.
